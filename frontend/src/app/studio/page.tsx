@@ -77,7 +77,6 @@ export default function StudioHomePage() {
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
               <BotCard
                 id="main"
-                name="MAXR Agent"
                 deployedAgo="Deployed · workflow active"
                 messages={messageCount}
                 errors={0}

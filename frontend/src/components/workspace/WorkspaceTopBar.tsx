@@ -1,46 +1,73 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Bell, Headphones, ChevronRight } from 'lucide-react';
+import { getBotMeta } from '@/lib/bot-meta';
 
 const crumbs: Record<string, string> = {
-  '/studio': 'Home',
   '/studio/integrations': 'Integrations',
   '/studio/usage': 'Usage',
   '/studio/billing': 'Billing',
   '/studio/settings': 'Settings',
 };
 
-function getBreadcrumbs(pathname: string) {
-  const parts = [{ label: 'Default Workspace', href: '/studio' }];
+type Breadcrumb = {
+  id: string;
+  label: string;
+  href?: string;
+};
+
+function getBreadcrumbs(pathname: string, botLabel: string): Breadcrumb[] {
+  const parts: Breadcrumb[] = [
+    { id: 'workspace', label: 'Default Workspace', href: '/studio' },
+  ];
+
   if (pathname.startsWith('/studio/bots/')) {
-    parts.push({ label: 'MAXR Agent', href: '/studio/bots/main/workflows' });
-    if (pathname.includes('/workflows')) parts.push({ label: 'Workflows', href: pathname });
-    if (pathname.includes('/conversations')) parts.push({ label: 'Conversations', href: pathname });
-    if (pathname.includes('/knowledge')) parts.push({ label: 'Knowledge', href: pathname });
+    const botBase = pathname.match(/^\/studio\/bots\/[^/]+/)?.[0] ?? '/studio/bots/main';
+    parts.push({ id: 'bot', label: botLabel, href: `${botBase}/workflows` });
+
+    if (pathname.includes('/workflows')) {
+      parts.push({ id: 'workflows', label: 'Workflows' });
+    } else if (pathname.includes('/conversations')) {
+      parts.push({ id: 'conversations', label: 'Conversations' });
+    } else if (pathname.includes('/knowledge')) {
+      parts.push({ id: 'knowledge', label: 'Knowledge' });
+    }
     return parts;
   }
-  const label = crumbs[pathname];
-  if (label && pathname !== '/studio') {
-    parts.push({ label, href: pathname });
-  } else if (pathname === '/studio') {
-    parts.push({ label: 'Home', href: '/studio' });
+
+  if (pathname === '/studio') {
+    parts.push({ id: 'home', label: 'Home' });
+    return parts;
   }
+
+  const label = crumbs[pathname];
+  if (label) {
+    parts.push({ id: pathname, label, href: pathname });
+  }
+
   return parts;
 }
 
 export default function WorkspaceTopBar() {
   const pathname = usePathname();
-  const trail = getBreadcrumbs(pathname);
+  const [botLabel, setBotLabel] = useState('MAXR Agent');
+
+  useEffect(() => {
+    setBotLabel(getBotMeta('main').name);
+  }, [pathname]);
+
+  const trail = getBreadcrumbs(pathname, botLabel);
 
   return (
     <header className="flex h-14 shrink-0 items-center justify-between border-b border-slate-200/80 bg-white px-5">
       <nav className="flex items-center gap-1 text-sm text-slate-500 min-w-0">
         {trail.map((item, i) => (
-          <span key={item.href} className="flex items-center gap-1 min-w-0">
+          <span key={item.id} className="flex items-center gap-1 min-w-0">
             {i > 0 && <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-300" />}
-            {i === trail.length - 1 ? (
+            {i === trail.length - 1 || !item.href ? (
               <span className="font-medium text-slate-900 truncate">{item.label}</span>
             ) : (
               <Link href={item.href} className="hover:text-slate-800 truncate">
