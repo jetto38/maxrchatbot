@@ -30,16 +30,33 @@ export class QdrantService implements OnModuleInit {
     }
   }
 
-  async ensureCollection(name: string, vectorSize: number = 1536) {
+  async ensureCollection(name: string, vectorSize: number = 1024) {
     try {
       const collections = await this.client.getCollections();
       const exists = collections.collections.some((c) => c.name === name);
-      if (!exists) {
-        await this.client.createCollection(name, {
-          vectors: { size: vectorSize, distance: 'Cosine' },
-        });
-        this.logger.log(`Created Qdrant collection: ${name}`);
+
+      if (exists) {
+        // Recreate if the existing collection's vector size doesn't match the
+        // current embedding model (e.g. after switching OpenAI 1536 -> Cohere
+        // 1024). Mismatched dimensions make every upsert/search fail.
+        const info = await this.client.getCollection(name);
+        const params: any = info.config?.params?.vectors;
+        const currentSize =
+          typeof params?.size === 'number' ? params.size : undefined;
+        if (currentSize !== undefined && currentSize !== vectorSize) {
+          this.logger.warn(
+            `Qdrant collection ${name} dimension ${currentSize} != ${vectorSize}; recreating.`,
+          );
+          await this.client.deleteCollection(name);
+        } else {
+          return;
+        }
       }
+
+      await this.client.createCollection(name, {
+        vectors: { size: vectorSize, distance: 'Cosine' },
+      });
+      this.logger.log(`Created Qdrant collection: ${name} (dim ${vectorSize})`);
     } catch (err) {
       this.logger.warn(`Unable to ensure Qdrant collection ${name}: ${err}`);
     }

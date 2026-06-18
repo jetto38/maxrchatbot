@@ -1,29 +1,81 @@
 import { Injectable, Logger } from '@nestjs/common';
-import OpenAI from 'openai';
 
+/**
+ * Cohere-backed embeddings (no OpenAI runtime dependency).
+ *
+ * Chat/completions use Groq; embeddings use Cohere because Groq has no
+ * embeddings API. Calls the Cohere v2 /embed endpoint directly via fetch.
+ *
+ * Config (env):
+ *   COHERE_API_KEY     required
+ *   COHERE_EMBED_MODEL default 'embed-v4.0'
+ *   COHERE_EMBED_DIM   default 1024 (embed-v4.0 supports 256/512/1024/1536)
+ */
 @Injectable()
 export class EmbeddingsService {
   private readonly logger = new Logger(EmbeddingsService.name);
-  private client: OpenAI;
+  private readonly apiUrl = 'https://api.cohere.com/v2/embed';
+  private readonly model = process.env.COHERE_EMBED_MODEL || 'embed-v4.0';
+  // Vector dimension produced by the model; must match the Qdrant collection.
+  readonly dimension = Number(process.env.COHERE_EMBED_DIM) || 1024;
+  // Cohere allows at most 96 texts per embed call.
+  private readonly MAX_BATCH = 96;
 
   constructor() {
-    this.client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || 'dummy' });
+    if (!process.env.COHERE_API_KEY) {
+      this.logger.warn('COHERE_API_KEY not set — embeddings will fail at runtime');
+    }
   }
 
+  /** Embed a single search query (input_type=search_query). */
   async generateEmbedding(text: string): Promise<number[]> {
-    const response = await this.client.embeddings.create({
-      model: 'text-embedding-3-small',
-      input: text,
-    });
-    return response.data[0].embedding;
+    const [vec] = await this.embed([text], 'search_query');
+    return vec;
   }
 
+  /** Embed documents for storage (input_type=search_document). */
   async generateEmbeddings(texts: string[]): Promise<number[][]> {
-    const response = await this.client.embeddings.create({
-      model: 'text-embedding-3-small',
-      input: texts,
+    const out: number[][] = [];
+    for (let i = 0; i < texts.length; i += this.MAX_BATCH) {
+      const batch = texts.slice(i, i + this.MAX_BATCH);
+      out.push(...(await this.embed(batch, 'search_document')));
+    }
+    return out;
+  }
+
+  private async embed(
+    texts: string[],
+    inputType: 'search_query' | 'search_document',
+  ): Promise<number[][]> {
+    const apiKey = process.env.COHERE_API_KEY;
+    if (!apiKey) throw new Error('COHERE_API_KEY not configured');
+
+    const res = await fetch(this.apiUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: this.model,
+        texts,
+        input_type: inputType,
+        embedding_types: ['float'],
+        output_dimension: this.dimension,
+      }),
     });
-    return response.data.map((d) => d.embedding);
+
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      throw new Error(`Cohere embed failed (${res.status}): ${detail.slice(0, 300)}`);
+    }
+
+    const data: { embeddings?: { float?: number[][] } } = await res.json();
+    const vectors = data.embeddings?.float;
+    if (!vectors || vectors.length !== texts.length) {
+      throw new Error('Cohere embed returned unexpected payload');
+    }
+    return vectors;
   }
 
   chunkText(text: string, maxChunkSize: number = 512): string[] {

@@ -20,7 +20,8 @@ export class KnowledgeService {
   ) {}
 
   async onModuleInit() {
-    await this.qdrant.ensureCollection(this.COLLECTION);
+    // Collection dimension must match the embedding model (Cohere embed-v4.0).
+    await this.qdrant.ensureCollection(this.COLLECTION, this.embeddings.dimension);
   }
 
   async upload(content: string, title: string, sourceType?: string) {

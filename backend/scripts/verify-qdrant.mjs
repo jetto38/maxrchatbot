@@ -3,16 +3,17 @@
 // Verifies that QDRANT_URL / QDRANT_API_KEY are loaded correctly and that the
 // cluster (local OR Qdrant Cloud) supports the operations the app relies on:
 // collection creation, idempotent upsert (UUIDv5 ids), vector search (+score).
-// Optionally verifies OpenAI embeddings when OPENAI_API_KEY is set.
+// Optionally verifies Cohere embeddings when COHERE_API_KEY is set.
 //
 // Usage (from backend/):  node scripts/verify-qdrant.mjs
-//   QDRANT_URL / QDRANT_API_KEY (+ optional OPENAI_API_KEY) read from the env.
+//   QDRANT_URL / QDRANT_API_KEY (+ optional COHERE_API_KEY) read from the env.
 import { QdrantClient } from '@qdrant/js-client-rest';
 import { v5 as uuidv5 } from 'uuid';
 
 const NS = '6ba7b810-9dad-11d1-80b4-00c04fd430c8';
 const url = process.env.QDRANT_URL || 'http://localhost:6333';
 const apiKey = process.env.QDRANT_API_KEY || undefined;
+const DIM = Number(process.env.COHERE_EMBED_DIM) || 1024;
 
 const mask = (u) => u.replace(/(https?:\/\/[^/@]+).*/, '$1');
 console.log(`[verify] QDRANT_URL = ${mask(url)}`);
@@ -22,30 +23,40 @@ const client = new QdrantClient({ url, apiKey, checkCompatibility: false });
 const COLL = 'verify_qdrant_' + Date.now();
 
 async function getVector(seed) {
-  if (process.env.OPENAI_API_KEY) {
-    const { default: OpenAI } = await import('openai');
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    const r = await openai.embeddings.create({
-      model: 'text-embedding-3-small',
-      input: `verification sentence number ${seed} about refunds and returns`,
+  if (process.env.COHERE_API_KEY) {
+    const res = await fetch('https://api.cohere.com/v2/embed', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.COHERE_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: process.env.COHERE_EMBED_MODEL || 'embed-v4.0',
+        texts: [`verification sentence number ${seed} about refunds and returns`],
+        input_type: 'search_document',
+        embedding_types: ['float'],
+        output_dimension: DIM,
+      }),
     });
-    return r.data[0].embedding;
+    if (!res.ok) throw new Error(`Cohere embed ${res.status}: ${await res.text()}`);
+    const data = await res.json();
+    return data.embeddings.float[0];
   }
-  return Array.from({ length: 1536 }, (_, i) => Math.sin((i + seed) * 0.01));
+  return Array.from({ length: DIM }, (_, i) => Math.sin((i + seed) * 0.01));
 }
 
 try {
   await client.getCollections();
   console.log('PASS: connection (getCollections)');
 
-  if (process.env.OPENAI_API_KEY) {
+  if (process.env.COHERE_API_KEY) {
     const v = await getVector(0);
-    console.log(`PASS: OpenAI embeddings (dim ${v.length})`);
+    console.log(`PASS: Cohere embeddings (dim ${v.length})`);
   } else {
-    console.log('SKIP: OpenAI embeddings (OPENAI_API_KEY not set) — using synthetic vectors');
+    console.log('SKIP: Cohere embeddings (COHERE_API_KEY not set) — using synthetic vectors');
   }
 
-  await client.createCollection(COLL, { vectors: { size: 1536, distance: 'Cosine' } });
+  await client.createCollection(COLL, { vectors: { size: DIM, distance: 'Cosine' } });
   console.log('PASS: createCollection');
 
   const articleId = 'a1b2c3d4-0000-0000-0000-000000000001';
