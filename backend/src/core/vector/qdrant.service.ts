@@ -70,11 +70,13 @@ export class QdrantService implements OnModuleInit {
     collection: string,
     vector: number[],
     limit: number = 5,
+    filter?: Record<string, any>,
   ): Promise<QdrantPoint[]> {
     const result = await this.client.search(collection, {
       vector,
       limit,
       with_payload: true,
+      ...(filter ? { filter } : {}),
     });
     return result.map((r) => ({
       id: String(r.id),

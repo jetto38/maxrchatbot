@@ -29,12 +29,21 @@ export class KnowledgeController {
     return this.knowledgeService.search(query, +limit);
   }
 
-  // Structured retrieval result: { query, retrieval_strategy, used_chunks[] }
-  // with per-chunk citations (doc_id, chunk_id, title, relevance).
+  // Structured retrieval result: { query, intent, retrieval_strategy, used_chunks[] }
+  // with per-chunk citations (doc_id, chunk_id, title, category, relevance).
   @Get('search/detailed')
   @Public()
   searchDetailed(@Query('q') query: string, @Query('limit') limit = 5) {
     return this.knowledgeService.searchDetailed(query, +limit);
+  }
+
+  // Full RAG answer: intent-routed + filtered + reranked retrieval, then a
+  // grounded Groq completion. Returns { query, intent, retrieval_strategy,
+  // final_answer, used_chunks[] }.
+  @Get('ask')
+  @Public()
+  ask(@Query('q') query: string, @Query('limit') limit = 4) {
+    return this.knowledgeService.ask(query, +limit);
   }
 
   @Get()
