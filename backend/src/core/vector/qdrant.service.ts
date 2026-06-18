@@ -5,6 +5,7 @@ export interface QdrantPoint {
   id: string;
   vector: number[];
   payload: Record<string, any>;
+  score?: number;
 }
 
 @Injectable()
@@ -14,7 +15,10 @@ export class QdrantService implements OnModuleInit {
 
   constructor() {
     const url = process.env.QDRANT_URL || 'http://localhost:6333';
-    this.client = new QdrantClient({ url, checkCompatibility: false });
+    const apiKey = process.env.QDRANT_API_KEY || undefined;
+    // apiKey is required to connect to Qdrant Cloud (managed clusters reject
+    // unauthenticated requests). It is omitted for local/self-hosted Qdrant.
+    this.client = new QdrantClient({ url, apiKey, checkCompatibility: false });
   }
 
   async onModuleInit() {
@@ -59,6 +63,7 @@ export class QdrantService implements OnModuleInit {
       id: String(r.id),
       vector: [],
       payload: r.payload as Record<string, any>,
+      score: r.score,
     }));
   }
 
