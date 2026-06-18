@@ -263,7 +263,8 @@ export class FlowEngineService {
     try {
       const res = await this.aiFactory.getProvider().generateCompletion(messages);
       return res.content;
-    } catch {
+    } catch (err) {
+      this.logger.error(`AI completion failed: ${err instanceof Error ? err.message : err}`);
       return "I'm having trouble connecting to AI right now. Please try again or ask for a human agent.";
     }
   }

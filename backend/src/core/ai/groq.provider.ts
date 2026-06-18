@@ -23,8 +23,29 @@ export class GroqProvider implements AIProvider {
     messages: AIMessage[],
     options?: AICompletionOptions,
   ): Promise<AIResponse> {
-    const model = options?.model || process.env.GROQ_MODEL || 'llama3-70b-8192';
+    const model = options?.model || process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+    // A lighter model with a separate quota, used to keep the bot responsive
+    // when the primary model exhausts its daily token budget (429).
+    const fallbackModel = process.env.GROQ_FALLBACK_MODEL || 'llama-3.1-8b-instant';
 
+    try {
+      return await this.complete(model, messages, options);
+    } catch (err) {
+      if (this.isRateLimit(err) && model !== fallbackModel) {
+        this.logger.warn(
+          `Model "${model}" rate-limited; retrying with fallback "${fallbackModel}"`,
+        );
+        return this.complete(fallbackModel, messages, options);
+      }
+      throw err;
+    }
+  }
+
+  private async complete(
+    model: string,
+    messages: AIMessage[],
+    options?: AICompletionOptions,
+  ): Promise<AIResponse> {
     const completion = await this.client.chat.completions.create({
       model,
       messages,
@@ -45,5 +66,13 @@ export class GroqProvider implements AIProvider {
           }
         : undefined,
     };
+  }
+
+  private isRateLimit(err: unknown): boolean {
+    return (
+      typeof err === 'object' &&
+      err !== null &&
+      (err as { status?: number }).status === 429
+    );
   }
 }
