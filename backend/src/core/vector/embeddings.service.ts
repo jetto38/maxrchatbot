@@ -78,6 +78,41 @@ export class EmbeddingsService {
     return vectors;
   }
 
+  /**
+   * Rerank documents against a query with Cohere's rerank model. Returns the
+   * original indexes with relevance scores, best-first. Falls back to identity
+   * order (no scores) if the API is unavailable so retrieval still works.
+   */
+  async rerank(
+    query: string,
+    documents: string[],
+    topN?: number,
+  ): Promise<Array<{ index: number; relevance: number }>> {
+    const apiKey = process.env.COHERE_API_KEY;
+    if (!apiKey || documents.length === 0) {
+      return documents.map((_, index) => ({ index, relevance: 0 }));
+    }
+    try {
+      const res = await fetch('https://api.cohere.com/v2/rerank', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: process.env.COHERE_RERANK_MODEL || 'rerank-v3.5',
+          query,
+          documents,
+          top_n: topN ?? documents.length,
+        }),
+      });
+      if (!res.ok) throw new Error(`Cohere rerank ${res.status}`);
+      const data: { results?: Array<{ index: number; relevance_score: number }> } =
+        await res.json();
+      return (data.results ?? []).map((r) => ({ index: r.index, relevance: r.relevance_score }));
+    } catch (err) {
+      this.logger.warn(`Rerank unavailable, using vector order: ${err}`);
+      return documents.map((_, index) => ({ index, relevance: 0 }));
+    }
+  }
+
   chunkText(text: string, maxChunkSize: number = 512): string[] {
     const chunks: string[] = [];
     const sentences = text.split(/(?<=[.!?])\s+/);

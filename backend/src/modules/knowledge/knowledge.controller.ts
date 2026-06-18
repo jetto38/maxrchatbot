@@ -29,6 +29,14 @@ export class KnowledgeController {
     return this.knowledgeService.search(query, +limit);
   }
 
+  // Structured retrieval result: { query, retrieval_strategy, used_chunks[] }
+  // with per-chunk citations (doc_id, chunk_id, title, relevance).
+  @Get('search/detailed')
+  @Public()
+  searchDetailed(@Query('q') query: string, @Query('limit') limit = 5) {
+    return this.knowledgeService.searchDetailed(query, +limit);
+  }
+
   @Get()
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('ADMIN', 'SUPER_ADMIN')

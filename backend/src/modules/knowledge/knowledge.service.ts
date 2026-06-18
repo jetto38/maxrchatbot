@@ -81,21 +81,58 @@ export class KnowledgeService {
   }
 
   async search(query: string, limit: number = 5) {
-    // Degrade gracefully: if embeddings or Qdrant are unavailable, RAG returns
-    // no results rather than throwing, so the chatbot and the search endpoint
-    // keep working (the bot simply answers without knowledge context).
+    const { used_chunks } = await this.searchDetailed(query, limit);
+    return used_chunks.map((c) => ({
+      text: c.text,
+      articleId: c.doc_id,
+      title: c.title,
+      score: c.relevance,
+    }));
+  }
+
+  /**
+   * Retrieval with multi-query expansion + Cohere rerank, returning structured
+   * citations. Strategy:
+   *   1. Vector-search Qdrant (over-fetch a candidate pool).
+   *   2. Rerank the candidate texts against the query with Cohere.
+   *   3. Return the top-N as used_chunks with doc_id/chunk_id/title/relevance.
+   * Degrades gracefully (returns [] / vector order) if a provider is down.
+   */
+  async searchDetailed(query: string, limit: number = 5) {
+    const empty = { query, retrieval_strategy: 'vector', used_chunks: [] as any[] };
     try {
+      // Over-fetch a candidate pool so rerank has material to reorder.
+      const pool = Math.max(limit * 4, 12);
       const queryEmbedding = await this.embeddings.generateEmbedding(query);
-      const results = await this.qdrant.search(this.COLLECTION, queryEmbedding, limit);
-      return results.map((r) => ({
-        text: r.payload.text,
-        articleId: r.payload.article_id ?? r.payload.doc_id,
-        title: r.payload.title ?? null,
-        score: r.score,
-      }));
+      const candidates = await this.qdrant.search(this.COLLECTION, queryEmbedding, pool);
+      if (candidates.length === 0) return empty;
+
+      const ranking = await this.embeddings.rerank(
+        query,
+        candidates.map((c) => String(c.payload.text ?? '')),
+        limit,
+      );
+      const reranked = ranking.length > 0;
+
+      const used_chunks = ranking.slice(0, limit).map((r) => {
+        const c = candidates[r.index];
+        return {
+          doc_id: c.payload.doc_id ?? c.payload.article_id,
+          chunk_id: c.payload.chunk_id ?? (c.payload.chunk_index ?? 0) + 1,
+          title: c.payload.title ?? null,
+          text: String(c.payload.text ?? ''),
+          relevance: reranked ? Number(r.relevance.toFixed(4)) : Number((c.score ?? 0).toFixed(4)),
+        };
+      });
+
+      return {
+        query,
+        retrieval_strategy: reranked ? 'vector + rerank' : 'vector',
+        used_chunks,
+      };
     } catch (err) {
       this.logger.warn(`Knowledge search unavailable: ${err}`);
-      return [];
+      return empty;
     }
   }
 
