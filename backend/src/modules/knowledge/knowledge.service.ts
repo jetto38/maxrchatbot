@@ -32,20 +32,41 @@ export class KnowledgeService {
       .single();
     if (error) throw new Error(error.message);
 
-    await this.indexArticle(article.id, content);
+    await this.indexArticle(article.id, content, {
+      title: article.title,
+      source: article.source_type,
+    });
     return article;
   }
 
-  async indexArticle(articleId: string, content: string) {
+  async indexArticle(
+    articleId: string,
+    content: string,
+    meta?: { title?: string; source?: string },
+  ) {
     const chunks = this.embeddings.chunkText(content);
     const embeddings = await this.embeddings.generateEmbeddings(chunks);
+    const timestamp = Date.now();
 
     const points = chunks.map((chunk, i) => ({
       // Qdrant requires point IDs to be an unsigned integer or a UUID; the old
       // `${articleId}-${i}` form is rejected. Derive a stable UUID per chunk.
       id: uuidv5(`${articleId}-${i}`, POINT_ID_NAMESPACE),
       vector: embeddings[i],
-      payload: { article_id: articleId, text: chunk, chunk_index: i },
+      payload: {
+        text: chunk,
+        // Metadata schema for filtering/ordering (doc_id + chunk numbering).
+        // article_id/chunk_index kept for backward compatibility.
+        article_id: articleId,
+        chunk_index: i,
+        doc_id: articleId,
+        title: meta?.title ?? null,
+        source: meta?.source ?? 'text',
+        chunk_id: i + 1,
+        order: i + 1,
+        total_chunks: chunks.length,
+        timestamp,
+      },
     }));
 
     await this.qdrant.upsert(this.COLLECTION, points);
@@ -68,7 +89,8 @@ export class KnowledgeService {
       const results = await this.qdrant.search(this.COLLECTION, queryEmbedding, limit);
       return results.map((r) => ({
         text: r.payload.text,
-        articleId: r.payload.article_id,
+        articleId: r.payload.article_id ?? r.payload.doc_id,
+        title: r.payload.title ?? null,
         score: r.score,
       }));
     } catch (err) {
@@ -83,7 +105,10 @@ export class KnowledgeService {
       .select('*');
     if (articles) {
       for (const article of articles) {
-        await this.indexArticle(article.id, article.content);
+        await this.indexArticle(article.id, article.content, {
+          title: article.title,
+          source: article.source_type,
+        });
       }
     }
     return { reindexed: articles?.length || 0 };
