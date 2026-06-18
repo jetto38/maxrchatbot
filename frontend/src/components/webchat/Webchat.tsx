@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MessageCircle, X, Send, Minus, RotateCcw } from 'lucide-react';
+import { MessageCircle, X, Send, Minus, RotateCcw, Calendar } from 'lucide-react';
 import { useChatStore } from '@/store/useChatStore';
 import { botApi } from '@/lib/api';
 import {
@@ -12,6 +12,12 @@ import {
   setVisitorId as persistVisitorId,
   clearChatSession,
 } from '@/lib/chat-session';
+
+// Matches a Calendly booking link in bot replies so we can offer an inline
+// "Book a consultation" button (opens a modal) instead of a raw URL.
+// Trailing sentence punctuation (. , ! ? ; :) is excluded so the iframe src
+// doesn't pick up the period that ends the bot's sentence.
+const CALENDLY_RE = /https?:\/\/(?:www\.)?calendly\.com\/[^\s)]*[^\s).,!?;:]/i;
 
 function TypingDots() {
   return (
@@ -51,6 +57,7 @@ export default function Webchat() {
 
   const [input, setInput] = useState('');
   const [initLoading, setInitLoading] = useState(false);
+  const [bookingUrl, setBookingUrl] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -223,9 +230,12 @@ export default function Webchat() {
                   {error}
                 </div>
               )}
-              {messages.map((msg) => (
-                <div key={msg.id}>
-                  {msg.type === 'choice' && msg.choices ? null : (
+              {messages.map((msg) => {
+                if (msg.type === 'choice' && msg.choices) return <div key={msg.id} />;
+                const calendly =
+                  msg.role === 'assistant' ? msg.content.match(CALENDLY_RE)?.[0] : undefined;
+                return (
+                  <div key={msg.id}>
                     <div
                       className={
                         msg.role === 'user'
@@ -235,9 +245,18 @@ export default function Webchat() {
                     >
                       {msg.content}
                     </div>
-                  )}
-                </div>
-              ))}
+                    {calendly && (
+                      <button
+                        type="button"
+                        onClick={() => setBookingUrl(calendly)}
+                        className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-800"
+                      >
+                        <Calendar size={14} /> Book a consultation
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
               {showChoices && (
                 <div className="flex flex-wrap gap-2 pt-1">
                   {lastChoices!.map((c) => (
@@ -296,6 +315,33 @@ export default function Webchat() {
       >
         {isOpen ? <X size={24} /> : <MessageCircle size={24} />}
       </button>
+
+      {/* Calendly booking modal */}
+      {bookingUrl && (
+        <div
+          className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setBookingUrl(null)}
+        >
+          <div
+            className="relative flex h-[min(700px,90vh)] w-[min(800px,95vw)] flex-col overflow-hidden rounded-lg bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => setBookingUrl(null)}
+              aria-label="Close booking"
+              className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-gray-700 shadow hover:bg-white"
+            >
+              <X size={18} />
+            </button>
+            <iframe
+              src={bookingUrl}
+              title="Book a consultation"
+              className="h-full w-full border-0"
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
