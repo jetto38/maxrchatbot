@@ -159,7 +159,15 @@ export class FlowEngineService {
         }
         case 'ai': {
           if (node.data.text) {
-            messages.push({ type: 'text', content: node.data.text });
+            messages.push({ type: 'text', content: this.interpolate(node.data.text, state) });
+          } else if (messages.length === 0) {
+            // An AI node with no scripted greeting would otherwise leave the
+            // user staring at silence after a choice. Emit a short invitation
+            // so it's clear the bot is waiting for their question.
+            messages.push({
+              type: 'text',
+              content: 'Sure — how can I help? Go ahead and describe what you need.',
+            });
           }
           state.awaiting = 'text';
           return { messages, state, escalated };
