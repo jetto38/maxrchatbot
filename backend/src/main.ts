@@ -13,8 +13,16 @@ async function bootstrap() {
 
   app.setGlobalPrefix('api');
   app.use(helmet.default());
+  const corsOrigins = configService.get<string>('CORS_ORIGINS', '*').trim();
   app.enableCors({
-    origin: configService.get<string>('CORS_ORIGINS', '*').split(','),
+    // A literal "*" in an allow-list array never matches a real Origin header,
+    // so with credentials enabled the browser receives no
+    // Access-Control-Allow-Origin and blocks the request. Reflect the request
+    // origin instead (valid alongside credentials); otherwise use the list.
+    origin:
+      corsOrigins === '*'
+        ? true
+        : corsOrigins.split(',').map((o) => o.trim()).filter(Boolean),
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
     credentials: true,
   });
