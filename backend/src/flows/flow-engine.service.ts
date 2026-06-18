@@ -253,7 +253,11 @@ export class FlowEngineService {
     ];
 
     try {
-      const res = await this.aiFactory.getProvider().generateCompletion(messages);
+      // Low temperature keeps knowledge-grounded answers faithful — important for
+      // CATALOG-style replies that must list every item without summarizing.
+      const res = await this.aiFactory.getProvider().generateCompletion(messages, {
+        temperature: 0.2,
+      });
       return res.content;
     } catch {
       return "I'm having trouble connecting to AI right now. Please try again or ask for a human agent.";
