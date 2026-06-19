@@ -13,8 +13,13 @@ async function bootstrap() {
 
   app.setGlobalPrefix('api');
   app.use(helmet.default());
+  // CORS: the webchat widget is designed to be embedded cross-origin, so when
+  // CORS_ORIGINS is '*' (or unset) we reflect the request origin instead of
+  // sending a literal "*" header — required because credentials are enabled
+  // ("*" + credentials is rejected by browsers). Otherwise use the allow-list.
+  const corsOrigins = configService.get<string>('CORS_ORIGINS', '*');
   app.enableCors({
-    origin: configService.get<string>('CORS_ORIGINS', '*').split(','),
+    origin: corsOrigins === '*' ? true : corsOrigins.split(','),
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
     credentials: true,
   });

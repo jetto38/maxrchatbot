@@ -14,11 +14,13 @@ export class AIFactory {
   }
 
   getProvider(name?: string): AIProvider {
-    const providerName = name || process.env.AI_PROVIDER || 'openai';
+    // Groq is the default chat provider; OpenAI is no longer used unless
+    // explicitly selected via AI_PROVIDER=openai.
+    const providerName = name || process.env.AI_PROVIDER || 'groq';
     const provider = this.providers.get(providerName);
     if (!provider) {
-      this.logger.warn(`Provider "${providerName}" not found, falling back to openai`);
-      return this.providers.get('openai')!;
+      this.logger.warn(`Provider "${providerName}" not found, falling back to groq`);
+      return this.providers.get('groq')!;
     }
     return provider;
   }

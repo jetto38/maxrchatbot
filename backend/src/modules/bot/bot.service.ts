@@ -5,9 +5,28 @@ import { FlowEngineService } from '../../flows/flow-engine.service';
 import { FlowStoreService } from '../../flows/flow-store.service';
 import { FlowState, BotReplyMessage } from '../../flows/flow.types';
 
+// In-memory conversation shape used when Supabase is unavailable.
+interface MemConversation {
+  id: string;
+  metadata: Record<string, any>;
+  status: string;
+  messages: Array<{
+    id: string;
+    role: string;
+    content: string;
+    created_at: string;
+    metadata: Record<string, unknown>;
+  }>;
+}
+
 @Injectable()
 export class BotService {
   private readonly logger = new Logger(BotService.name);
+
+  // Fallback store so the webchat keeps working when Supabase is unreachable
+  // (e.g. no credentials in dev). Sessions tracked here bypass Supabase for all
+  // reads/writes; sessions created in Supabase continue to use Supabase.
+  private readonly memStore = new Map<string, MemConversation>();
 
   constructor(
     private supabase: SupabaseService,
@@ -18,35 +37,44 @@ export class BotService {
   async createSession(visitorId?: string) {
     const vid = visitorId || randomUUID();
     const flow = await this.flowStore.getPublishedFlow();
+    const initialMetadata = {
+      visitor_id: vid,
+      flow_id: flow.id,
+      flow_state: this.flowEngine.createInitialState(flow),
+    };
 
-    const { data, error } = await this.supabase.client
-      .from('conversations')
-      .insert({
-        source: 'webchat',
+    let sessionId: string;
+    try {
+      const { data, error } = await this.supabase.client
+        .from('conversations')
+        .insert({ source: 'webchat', status: 'active', metadata: initialMetadata })
+        .select('id')
+        .single();
+      if (error || !data) throw new Error(error?.message || 'insert returned no row');
+      sessionId = data.id;
+    } catch (err) {
+      // Supabase unavailable: fall back to an in-memory session so the welcome
+      // message is still delivered and the conversation can continue.
+      sessionId = randomUUID();
+      this.memStore.set(sessionId, {
+        id: sessionId,
         status: 'active',
-        metadata: {
-          visitor_id: vid,
-          flow_id: flow.id,
-          flow_state: this.flowEngine.createInitialState(flow),
-        },
-      })
-      .select('id')
-      .single();
-
-    if (error || !data) {
-      throw new Error(error?.message || 'Failed to create session');
+        metadata: initialMetadata,
+        messages: [],
+      });
+      this.logger.warn(`Supabase unavailable; using in-memory session ${sessionId}: ${err}`);
     }
 
     const turn = await this.flowEngine.startConversation(flow);
-    await this.persistFlowState(data.id, turn.state);
-    await this.storeBotMessages(data.id, turn.messages);
+    await this.persistFlowState(sessionId, turn.state);
+    await this.storeBotMessages(sessionId, turn.messages);
 
     if (turn.escalated) {
-      await this.escalate(data.id);
+      await this.escalate(sessionId);
     }
 
     return {
-      sessionId: data.id,
+      sessionId,
       visitorId: vid,
       messages: this.formatOutgoing(turn.messages),
     };
@@ -72,6 +100,16 @@ export class BotService {
   }
 
   async getHistory(sessionId: string) {
+    const mem = this.memStore.get(sessionId);
+    if (mem) {
+      return mem.messages.map((m) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        createdAt: m.created_at,
+        metadata: m.metadata,
+      }));
+    }
     const { data } = await this.supabase.client
       .from('messages')
       .select('*')
@@ -133,6 +171,17 @@ export class BotService {
     content: string,
     metadata?: Record<string, unknown>,
   ) {
+    const mem = this.memStore.get(sessionId);
+    if (mem) {
+      mem.messages.push({
+        id: randomUUID(),
+        role,
+        content,
+        created_at: new Date().toISOString(),
+        metadata: metadata ?? {},
+      });
+      return;
+    }
     await this.supabase.client.from('messages').insert({
       conversation_id: sessionId,
       role,
@@ -146,6 +195,11 @@ export class BotService {
   }
 
   private async persistFlowState(sessionId: string, state: FlowState) {
+    const mem = this.memStore.get(sessionId);
+    if (mem) {
+      mem.metadata = { ...mem.metadata, flow_state: state };
+      return;
+    }
     const conv = await this.getConversation(sessionId);
     await this.supabase.client
       .from('conversations')
@@ -157,6 +211,8 @@ export class BotService {
   }
 
   private async getConversation(sessionId: string) {
+    const mem = this.memStore.get(sessionId);
+    if (mem) return mem;
     const { data } = await this.supabase.client
       .from('conversations')
       .select('*')
@@ -167,6 +223,11 @@ export class BotService {
   }
 
   private async escalate(sessionId: string) {
+    const mem = this.memStore.get(sessionId);
+    if (mem) {
+      mem.status = 'escalated';
+      return;
+    }
     await this.supabase.client
       .from('conversations')
       .update({ status: 'escalated', updated_at: new Date().toISOString() })

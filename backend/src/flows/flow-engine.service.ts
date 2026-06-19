@@ -234,8 +234,11 @@ export class FlowEngineService {
   ): Promise<string> {
     let context = '';
     try {
-      const chunks = await this.knowledgeService.search(userText, 4);
-      context = chunks.map((c, i) => `[${i + 1}] ${c.text}`).join('\n');
+      // Reranked retrieval (vector + Cohere rerank) for better grounding.
+      const { used_chunks } = await this.knowledgeService.searchDetailed(userText, 4);
+      context = used_chunks
+        .map((c, i) => `[${i + 1}] ${c.title ? `(${c.title}) ` : ''}${c.text}`)
+        .join('\n');
     } catch (err) {
       this.logger.warn(`RAG skipped: ${err}`);
     }
@@ -253,7 +256,11 @@ export class FlowEngineService {
     ];
 
     try {
-      const res = await this.aiFactory.getProvider().generateCompletion(messages);
+      // Low temperature keeps knowledge-grounded answers faithful — important for
+      // CATALOG-style replies that must list every item without summarizing.
+      const res = await this.aiFactory.getProvider().generateCompletion(messages, {
+        temperature: 0.2,
+      });
       return res.content;
     } catch {
       return "I'm having trouble connecting to AI right now. Please try again or ask for a human agent.";
