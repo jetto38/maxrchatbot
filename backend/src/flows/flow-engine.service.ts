@@ -261,7 +261,7 @@ export class FlowEngineService {
     ];
 
     try {
-      const res = await this.aiFactory.getProvider().generateCompletion(messages);
+      const res = await this.aiFactory.generateWithFallback(messages);
       return res.content;
     } catch (err) {
       this.logger.error(`AI completion failed: ${err instanceof Error ? err.message : err}`);
