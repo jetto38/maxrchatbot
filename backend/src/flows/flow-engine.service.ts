@@ -159,7 +159,15 @@ export class FlowEngineService {
         }
         case 'ai': {
           if (node.data.text) {
-            messages.push({ type: 'text', content: node.data.text });
+            messages.push({ type: 'text', content: this.interpolate(node.data.text, state) });
+          } else if (messages.length === 0) {
+            // An AI node with no scripted greeting would otherwise leave the
+            // user staring at silence after a choice. Emit a short invitation
+            // so it's clear the bot is waiting for their question.
+            messages.push({
+              type: 'text',
+              content: 'Sure — how can I help? Go ahead and describe what you need.',
+            });
           }
           state.awaiting = 'text';
           return { messages, state, escalated };
@@ -253,9 +261,10 @@ export class FlowEngineService {
     ];
 
     try {
-      const res = await this.aiFactory.getProvider().generateCompletion(messages);
+      const res = await this.aiFactory.generateWithFallback(messages);
       return res.content;
-    } catch {
+    } catch (err) {
+      this.logger.error(`AI completion failed: ${err instanceof Error ? err.message : err}`);
       return "I'm having trouble connecting to AI right now. Please try again or ask for a human agent.";
     }
   }

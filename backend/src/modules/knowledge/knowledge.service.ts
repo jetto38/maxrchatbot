@@ -1,7 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { v5 as uuidv5 } from 'uuid';
 import { QdrantService } from '../../core/vector/qdrant.service';
 import { EmbeddingsService } from '../../core/vector/embeddings.service';
 import { SupabaseService } from '../../core/database/supabase.service';
+
+// Stable namespace so a given (articleId, chunkIndex) always maps to the same
+// Qdrant point id — Qdrant only accepts UUIDs or unsigned ints, not strings
+// like `${articleId}-${i}`, and re-indexing should overwrite, not duplicate.
+const POINT_ID_NAMESPACE = '6ba7b810-9dad-11d1-80b4-00c04fd430c8';
 
 @Injectable()
 export class KnowledgeService {
@@ -15,7 +21,7 @@ export class KnowledgeService {
   ) {}
 
   async onModuleInit() {
-    await this.qdrant.ensureCollection(this.COLLECTION);
+    await this.qdrant.ensureCollection(this.COLLECTION, this.embeddings.dimension);
   }
 
   async upload(content: string, title: string, sourceType?: string) {
@@ -35,7 +41,7 @@ export class KnowledgeService {
     const embeddings = await this.embeddings.generateEmbeddings(chunks);
 
     const points = chunks.map((chunk, i) => ({
-      id: `${articleId}-${i}`,
+      id: uuidv5(`${articleId}-${i}`, POINT_ID_NAMESPACE),
       vector: embeddings[i],
       payload: { article_id: articleId, text: chunk, chunk_index: i },
     }));

@@ -223,9 +223,15 @@ export default function Webchat() {
                   {error}
                 </div>
               )}
-              {messages.map((msg) => (
-                <div key={msg.id}>
-                  {msg.type === 'choice' && msg.choices ? null : (
+              {messages.map((msg) => {
+                // Choice messages carry their selectable options separately (rendered
+                // as buttons below). Still show any prompt text they include — e.g.
+                // "Please select one of the options below:" — so typed input that
+                // re-triggers the menu isn't silently dropped. Skip only blank text.
+                const text = msg.content?.trim();
+                if (!text) return null;
+                return (
+                  <div key={msg.id}>
                     <div
                       className={
                         msg.role === 'user'
@@ -235,9 +241,9 @@ export default function Webchat() {
                     >
                       {msg.content}
                     </div>
-                  )}
-                </div>
-              ))}
+                  </div>
+                );
+              })}
               {showChoices && (
                 <div className="flex flex-wrap gap-2 pt-1">
                   {lastChoices!.map((c) => (

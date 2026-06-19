@@ -8,14 +8,31 @@ export function getApiBase(): string {
   return 'http://localhost:3001';
 }
 
-const FETCH_TIMEOUT_MS = 8000;
+const FETCH_TIMEOUT_MS = 30000;
 
-export async function fetchApi(path: string, init?: RequestInit): Promise<Response> {
+export async function fetchApi(
+  path: string,
+  init?: RequestInit,
+  timeoutMs: number = FETCH_TIMEOUT_MS,
+): Promise<Response> {
   const url = `${getApiBase()}${path.startsWith('/') ? path : `/${path}`}`;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
   try {
     return await fetch(url, { ...init, signal: controller.signal });
+  } catch (err) {
+    // Translate the cryptic native abort ("signal is aborted without reason")
+    // into a clear, user-facing message.
+    if (timedOut || (err instanceof DOMException && err.name === 'AbortError')) {
+      throw new Error('The request timed out. Please try again.');
+    }
+    throw err instanceof Error
+      ? err
+      : new Error('Network error — could not reach the server.');
   } finally {
     clearTimeout(timer);
   }
