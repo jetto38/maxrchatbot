@@ -34,7 +34,31 @@ export class QdrantService implements OnModuleInit {
         await this.client.createCollection(name, {
           vectors: { size: vectorSize, distance: 'Cosine' },
         });
-        this.logger.log(`Created Qdrant collection: ${name}`);
+        this.logger.log(`Created Qdrant collection: ${name} (size ${vectorSize})`);
+        return;
+      }
+
+      // If the existing collection's vector size no longer matches the active
+      // embedding provider (e.g. switched OpenAI 1536 -> Cohere 1024), inserts
+      // would fail. Recreate it when empty; otherwise warn rather than wipe data.
+      const info = await this.client.getCollection(name);
+      const currentSize = (info.config?.params?.vectors as { size?: number } | undefined)?.size;
+      const pointCount = info.points_count ?? 0;
+      if (currentSize && currentSize !== vectorSize) {
+        if (pointCount === 0) {
+          await this.client.deleteCollection(name);
+          await this.client.createCollection(name, {
+            vectors: { size: vectorSize, distance: 'Cosine' },
+          });
+          this.logger.log(
+            `Recreated Qdrant collection ${name}: size ${currentSize} -> ${vectorSize}`,
+          );
+        } else {
+          this.logger.warn(
+            `Qdrant collection ${name} size ${currentSize} != embedding size ${vectorSize}, ` +
+              `but it holds ${pointCount} points — leaving as-is. Run a reindex after clearing it.`,
+          );
+        }
       }
     } catch (err) {
       this.logger.warn(`Unable to ensure Qdrant collection ${name}: ${err}`);
@@ -58,7 +82,7 @@ export class QdrantService implements OnModuleInit {
     return result.map((r) => ({
       id: String(r.id),
       vector: [],
-      payload: r.payload as Record<string, any>,
+      payload: { ...(r.payload as Record<string, any>), score: r.score },
     }));
   }
 
